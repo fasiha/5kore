@@ -3,8 +3,8 @@ var choo = require('choo');
 var html = require('choo/html');
 var app = choo();
 app.use((state, emitter) => {
-  state.name = "Sally";
   state.quiz = null;
+  state.answered = null;
 
   function wrapRender(f) {
     return data => {
@@ -12,8 +12,10 @@ app.use((state, emitter) => {
       emitter.emit('render')
     };
   }
-  emitter.on('nameChange', wrapRender(data => state.name = data));
-  emitter.on('pickedQuiz', wrapRender(data => state.quiz = data));
+  emitter.on('pickedQuiz', wrapRender(data => {
+               state.quiz = data;
+               state.answered = null;
+             }));
   emitter.on('clearQuiz', wrapRender(data => state.quiz = null));
   emitter.on('proposeAnswer', wrapRender(data => {
                // console.log(data, state);
@@ -22,18 +24,25 @@ app.use((state, emitter) => {
                } else {
                  console.log('Fail :(');
                }
-               state.quiz = pickQuiz();
+               state.answered = data;
+               //  state.quiz = pickQuiz();
              }));
 });
 function main(state, emit) {
-  // console.log(state);
-  var quizHtml;
-  if (state.quiz) {
-    quizHtml = administerQuiz(state.quiz, emit);
+  console.log(state);
+  var raw;
+  if (state.quiz && !state.answered) {
+    raw = administerQuiz(state.quiz, emit);
+  } else if (state.quiz && state.answered !== null) {
+    var answer = state.answered;
+    var result = answer === state.quiz[0];
+    var resultStr = result ? "🙌 congrats!" : "💩";
+    raw = html`${resultStr}`;
   }
   return html`<div>
-  <button onclick=${hitClick}>Hit me ${state.name}</button>
-  ${quizHtml}
+  <button onclick=${hitClick}>Quiz me</button>
+  <button onclick=${hitClick}>Teach me</button>
+  ${raw}
   </div>`;
 
   function hitClick(e) { emit('pickedQuiz', pickQuiz()); }
@@ -51,6 +60,8 @@ function administerQuiz(picked, emit) {
   var [num, field] = picked;
   var fact = tono[num];
   var hasKanji = fact.kanjis.length > 0;
+
+  // Prompts to elicit the field under quiz from student
   var clues;
   if (field === 'kanjis') {
     clues = `${fact.readings.join('/')} (${fact.meaning})`;
@@ -60,6 +71,7 @@ function administerQuiz(picked, emit) {
     clues = (hasKanji ? fact.kanjis.join('/') + '; ' : '') +
             fact.readings.join('/');
   }
+
   // for now, let this function pick confusers. pickQuiz could also suggest
   // confusers, or alternatively a more complicated UI could be here (text
   // input, reorder words, etc.)
@@ -69,16 +81,17 @@ function administerQuiz(picked, emit) {
     let f = Array.from(Array(4), () => tono[randomFactWithKanji(num)]);
     f.push(fact);
     shuffle(f);
-    confusers = f.map(f => html`<li>${btn(f.num)}${f.kanjis.join('/')}</li>`);
+    confusers =
+        f.map(f => html`<li>${btn(f.num)}${f.num}${f.kanjis.join('/')}</li>`);
   } else {
     let f = Array.from(Array(4), () => tono[randinot(tono.length, num)]);
     f.push(fact);
     shuffle(f);
     if (field === 'readings') {
-      confusers =
-          f.map(f => html`<li>${btn(f.num)}${f.readings.join('/')}</li>`);
+      confusers = f.map(
+          f => html`<li>${btn(f.num)}${f.num}${f.readings.join('/')}</li>`);
     } else {
-      confusers = f.map(f => html`<li>${btn(f.num)}${f.meaning}</li>`);
+      confusers = f.map(f => html`<li>${btn(f.num)}${f.num}${f.meaning}</li>`);
     }
   }
 
@@ -95,18 +108,6 @@ function administerQuiz(picked, emit) {
   }
 }
 
-function randomFactWithKanji(not) {
-  if (typeof not === 'undefined') {
-    not = -1;
-  }
-  while (true) {
-    var num = randi(tono.length);
-    if (tono[num].kanjis.length > 0 && num !== not) {
-      return num
-    };
-  }
-}
-
 // Pick a fact (and any specifics, like sub-fact) to quiz
 function pickQuiz() {
   var topics;
@@ -118,6 +119,20 @@ function pickQuiz() {
   }
   const quiz = [ num, topics[randi(topics.length)] ];
   return quiz;
+}
+
+// Utilities
+
+function randomFactWithKanji(not) {
+  if (typeof not === 'undefined') {
+    not = -1;
+  }
+  while (true) {
+    var num = randi(tono.length);
+    if (tono[num].kanjis.length > 0 && num !== not) {
+      return num
+    };
+  }
 }
 
 // Fisher-Yates draw-without-replacement shuffle
