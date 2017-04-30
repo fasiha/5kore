@@ -13,8 +13,17 @@ app.use((state, emitter) => {
     };
   }
   emitter.on('nameChange', wrapRender(data => state.name = data));
-  emitter.on('pickQuiz', wrapRender(data => state.quiz = data));
+  emitter.on('pickedQuiz', wrapRender(data => state.quiz = data));
   emitter.on('clearQuiz', wrapRender(data => state.quiz = null));
+  emitter.on('proposeAnswer', wrapRender(data => {
+               // console.log(data, state);
+               if (data === state.quiz[0]) {
+                 console.log('Success!');
+               } else {
+                 console.log('Fail :(');
+               }
+               state.quiz = pickQuiz();
+             }));
 });
 function main(state, emit) {
   // console.log(state);
@@ -27,7 +36,7 @@ function main(state, emit) {
   ${quizHtml}
   </div>`;
 
-  function hitClick(e) { emit('pickQuiz', pickQuiz()); }
+  function hitClick(e) { emit('pickedQuiz', pickQuiz()); }
 }
 app.route('/', main);
 app.mount('#app');
@@ -55,15 +64,21 @@ function administerQuiz(picked, emit) {
   // confusers, or alternatively a more complicated UI could be here (text
   // input, reorder words, etc.)
   var confusers;
+  var btn = (i) => html`<button choo-num=${i - 1} onclick=${accept}>x</button>`;
   if (field === 'kanjis') {
-    let facts = Array.from(Array(4), () => tono[randomFactWithKanji(num)]);
-    confusers = facts.map(fact => html`<li>${fact.kanjis.join('/')}</li>`);
+    let f = Array.from(Array(4), () => tono[randomFactWithKanji(num)]);
+    f.push(fact);
+    shuffle(f);
+    confusers = f.map(f => html`<li>${btn(f.num)}${f.kanjis.join('/')}</li>`);
   } else {
-    let facts = Array.from(Array(4), () => tono[randinot(tono.length, num)]);
+    let f = Array.from(Array(4), () => tono[randinot(tono.length, num)]);
+    f.push(fact);
+    shuffle(f);
     if (field === 'readings') {
-      confusers = facts.map(fact => html`<li>${fact.readings.join('/')}</li>`);
+      confusers =
+          f.map(f => html`<li>${btn(f.num)}${f.readings.join('/')}</li>`);
     } else {
-      confusers = facts.map(fact => html`<li>${fact.meaning}</li>`);
+      confusers = f.map(f => html`<li>${btn(f.num)}${f.meaning}</li>`);
     }
   }
 
@@ -73,6 +88,11 @@ function administerQuiz(picked, emit) {
       ${confusers}
       </ol>
   </div>`;
+
+  function accept(e) {
+    var proposal = e.target.getAttribute('choo-num');
+    emit('proposeAnswer', +proposal);
+  }
 }
 
 function randomFactWithKanji(not) {
@@ -98,6 +118,16 @@ function pickQuiz() {
   }
   const quiz = [ num, topics[randi(topics.length)] ];
   return quiz;
+}
+
+// Fisher-Yates draw-without-replacement shuffle
+function shuffle(array) {
+  for (var i = array.length - 1; i > 0; i -= 1) {
+    var j = randi(i + 1);
+    var temp = array[i];
+    array[i] = array[j];
+    array[j] = temp;
+  }
 }
 
 function randinot(n, not) {
