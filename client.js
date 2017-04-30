@@ -17,7 +17,7 @@ app.use((state, emitter) => {
   emitter.on('clearQuiz', wrapRender(data => state.quiz = null));
 });
 function main(state, emit) {
-  console.log(state);
+  // console.log(state);
   var quizHtml;
   if (state.quiz) {
     quizHtml = administerQuiz(state.quiz, x => console.log('result,', x));
@@ -40,15 +40,32 @@ var tono = JSON.parse(fs.readFileSync('data/tono.json', 'utf8'));
 // Administer a quiz
 function administerQuiz(picked, resultCallback) {
   var [num, field] = picked;
-  return html`<div>I picked ${num} and ${field}!
+  var fact = tono[num];
+  var hasKanji = fact.kanjis.length > 0;
+  var clues;
+  if (field === 'kanjis') {
+    clues = `${fact.readings.join('/')} (${fact.meaning})`;
+  } else if (field === 'readings') {
+    clues = `${hasKanji ? fact.kanjis.join('/') : ''} (${fact.meaning})`;
+  } else {
+    clues = (hasKanji ? fact.kanjis.join('/') + '; ' : '') +
+            fact.readings.join('/');
+  }
+  return html`<div>
+      You have to guess #${num + 1}’s ${field}! Soooo, ${clues}!
   </div>`;
 }
 
 // Pick a fact (and any specifics, like sub-fact) to quiz
 function pickQuiz() {
-  const topics = [ 'kanjis', 'readings', 'meanings' ];
-  const quiz = [ randi(5000), topics[randi(3)] ];
-  console.log('picked', quiz);
+  var topics;
+  var num = randi(5000);
+  if (tono[num].kanjis.length === 0) {
+    topics = [ 'readings', 'meaning' ]
+  } else {
+    topics = [ 'kanjis', 'readings', 'meaning' ];
+  }
+  const quiz = [ num, topics[randi(topics.length)] ];
   return quiz;
 }
 
