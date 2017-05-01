@@ -2,9 +2,15 @@
 var choo = require('choo');
 var html = require('choo/html');
 var app = choo();
+
+var fs = require('fs');
+var tono = JSON.parse(fs.readFileSync('data/tono.json', 'utf8'));
+
+// Set up state and handlers (in re-frame terminology)
 app.use((state, emitter) => {
-  state.quiz = null;
-  state.answered = null;
+  state.quiz = null;      // Maybe [number under quiz, field]
+  state.answered = null;  // Maybe number of answer
+  state.page = 'showall'; // Quiz | Answered | ShowAll | Learn
 
   function wrapRender(f) {
     return data => {
@@ -15,45 +21,69 @@ app.use((state, emitter) => {
   emitter.on('pickedQuiz', wrapRender(data => {
                state.quiz = data;
                state.answered = null;
+               state.page = 'quiz';
              }));
   emitter.on('clearQuiz', wrapRender(data => state.quiz = null));
   emitter.on('proposeAnswer', wrapRender(data => {
-               // console.log(data, state);
-               if (data === state.quiz[0]) {
-                 console.log('Success!');
-               } else {
-                 console.log('Fail :(');
-               }
                state.answered = data;
-               //  state.quiz = pickQuiz();
+               state.page = 'answered';
+               // state.quiz = pickQuiz();
              }));
+  emitter.on('seeAll', wrapRender(() => { state.page = 'showall'; }))
 });
+
+// Set up views
 function main(state, emit) {
   console.log(state);
   var raw;
-  if (state.quiz && !state.answered) {
+  if (state.page === 'quiz') {
     raw = administerQuiz(state.quiz, emit);
-  } else if (state.quiz && state.answered !== null) {
-    var answer = state.answered;
-    var result = answer === state.quiz[0];
-    var resultStr = result ? "🙌 congrats!" : "💩";
-    raw = html`${resultStr}`;
+  } else if (state.page === 'answered') {
+    raw = answeredQuiz(state.quiz, state.answered);
+  } else if (state.page === 'showall') {
+    raw = allFacts();
+  } else if (state.page === 'learn') {
+    raw = html`<div>
+    Learning
+    </div>`;
   }
   return html`<div>
   <button onclick=${hitClick}>Quiz me</button>
-  <button onclick=${hitClick}>Teach me</button>
+  <button onclick=${showClick}>Show all</button>
   ${raw}
   </div>`;
 
   function hitClick(e) { emit('pickedQuiz', pickQuiz()); }
+  function showClick(e) { emit('seeAll'); }
 }
 app.route('/', main);
 app.mount('#app');
 
-///////////////// Quizzer!
+///////////////// Quizzer! And other screens!
 
-var fs = require('fs');
-var tono = JSON.parse(fs.readFileSync('data/tono.json', 'utf8'));
+function renderFact(fact) {
+  var readings = fact.readings.join('/');
+  if (fact.kanjis.length > 0) {
+    var kanjis = fact.kanjis.join('/');
+    return html`<ruby>${kanjis}<rt>${readings}</rt></ruby>`;
+  }
+  return html`<span>${readings}</span>`;
+}
+
+function allFacts() {
+  var renderedFacts = tono.map(o => html`<li>${renderFact(o)}</li>`);
+  return html`<ul>
+  ${renderedFacts}
+  </ul>`;
+}
+
+function answeredQuiz(picked, answer) {
+  var result = answer === picked[0];
+  var resultStr = result ? "🙌 congrats!" : "💩";
+  return html`<div>${resultStr}
+  ${JSON.stringify(tono[picked[0]])}
+  </div>`;
+}
 
 // Administer a quiz
 function administerQuiz(picked, emit) {
