@@ -8,9 +8,10 @@ var tono = JSON.parse(fs.readFileSync('data/tono.json', 'utf8'));
 
 // Set up state and handlers (in re-frame terminology)
 app.use((state, emitter) => {
-  state.quiz = null;      // Maybe [number under quiz, field]
+  state.quiz = null;      // Maybe [number under quiz 0 <= num <= 4999, field]
   state.answered = null;  // Maybe number of answer
   state.page = 'showall'; // Quiz | Answered | ShowAll | Learn
+  state.learning = null;  // Maybe (number to learn, 0 <= num <= 4999)
 
   function wrapRender(f) {
     return data => {
@@ -30,6 +31,11 @@ app.use((state, emitter) => {
                // state.quiz = pickQuiz();
              }));
   emitter.on('seeAll', wrapRender(() => { state.page = 'showall'; }))
+  emitter.on('learnFact', wrapRender((data) => {
+               state.page = 'learn';
+               state.learning = data;
+             }));
+  emitter.on('doneLearning', wrapRender(() => { state.page = 'showall'; }))
 });
 
 // Set up views
@@ -41,15 +47,13 @@ function main(state, emit) {
   } else if (state.page === 'answered') {
     raw = answeredQuiz(state.quiz, state.answered);
   } else if (state.page === 'showall') {
-    raw = allFacts();
+    raw = allFacts(emit);
   } else if (state.page === 'learn') {
-    raw = html`<div>
-    Learning
-    </div>`;
+    raw = learning(state.learning, emit);
   }
   return html`<div>
-  <button onclick=${hitClick}>Quiz me</button>
   <button onclick=${showClick}>Show all</button>
+  <button onclick=${hitClick}>Quiz me</button>
   ${raw}
   </div>`;
 
@@ -61,7 +65,36 @@ app.mount('#app');
 
 ///////////////// Quizzer! And other screens!
 
-function renderFact(fact) {
+var registerToFull = {
+  BK : "books",
+  WB : "web",
+  OF : "official documents",
+  NM : "newspapers and magazines",
+  SP : "spoken"
+};
+
+function learning(num, emit) {
+  var fact = tono[num];
+  var register = fact.register ? html`<li>
+  Top word in the <em>${registerToFull[fact.register]}</em> register.
+  </li>`
+                               : '';
+  return html`<div>
+  Remember this! ${quickRenderFact(fact)} means: ${fact.meaning}.
+  <ul>
+    <li>Roumaji: ${fact.roumaji}</li>
+    <li>Frequency: ${fact.freq} per million</li>
+    <li>#${fact.num}</li>
+    <li>Dispersion: ${fact.disp}</li>
+    ${register}
+  </ul>
+  <button onclick=${learnedClick}>I HAVE LEARNED THIS!</button>
+  </div>`;
+
+  function learnedClick() { emit('doneLearning'); }
+}
+
+function quickRenderFact(fact) {
   var readings = fact.readings.join('/');
   if (fact.kanjis.length > 0) {
     var kanjis = fact.kanjis.join('/');
@@ -70,11 +103,16 @@ function renderFact(fact) {
   return html`<span>${readings}</span>`;
 }
 
-function allFacts() {
-  var renderedFacts = tono.map(o => html`<li>${renderFact(o)}</li>`);
+function allFacts(emit) {
+  var renderedFacts = tono.map(o => html`<li>
+    <button choo-num=${o.num - 1} onclick=${click}>learn</button>
+    ${quickRenderFact(o)}
+    </li>`);
   return html`<ul>
   ${renderedFacts}
   </ul>`;
+
+  function click(e) { emit('learnFact', +e.target.getAttribute('choo-num')) }
 }
 
 function answeredQuiz(picked, answer) {
