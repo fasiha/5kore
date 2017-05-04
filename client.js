@@ -3,15 +3,75 @@ var choo = require('choo');
 var html = require('choo/html');
 var app = choo();
 
-var fs = require('fs');
-var tono = JSON.parse(fs.readFileSync('data/tono.json', 'utf8'));
+/////////////////// Lovefield
+
+var schemaBuilder = lf.schema.create('5kore', 1);
+schemaBuilder.createTable('Fact')
+    .addColumn('num', lf.Type.NUMBER)
+    .addColumn('lastQuizTime', lf.Type.DATE_TIME)
+    .addColumn('recallObject', lf.Type.OBJECT)
+    .addColumn('skipped', lf.Type.BOOLEAN)
+    .addColumn('studied', lf.Type.BOOLEAN)
+    .addPrimaryKey([ 'num' ])
+    .addNullable([ 'lastQuizTime', 'recallObject' ]);
+// TODO Add an index to find the next thing to study
+
+schemaBuilder.createTable('Quiz')
+    .addColumn('num', lf.Type.NUMBER)
+    .addColumn('date', lf.Type.DATE_TIME)
+    .addColumn('result', lf.Type.BOOLEAN)
+    .addPrimaryKey([ 'date' ])
+    .addForeignKey('fk_NumQuiz', {local : 'num', ref : 'Fact.num'});
+
+var koredb;
+var factTable;
+var quizTable;
+
+function factOk(fact) {
+  var lookFors = 'n.,v.,adj.,adv.,pron.,adn.'.split(',');
+  for (let target of lookFors) {
+    if (fact.meaning.indexOf(target) >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function initializing(emit) {
+  schemaBuilder.connect()
+      .then(function(db) {
+        koredb = db;
+        factTable = db.getSchema().table('Fact');
+        quizTable = db.getSchema().table('Quiz');
+        return koredb.select(lf.fn.count(factTable.num)).from(factTable).exec();
+      })
+      .then(o => {
+        var numrows = o[0]['COUNT(num)'];
+        if (numrows === 0) {
+          console.log('No facts found, populating');
+          let rows = tono.map(fact => {
+            return factTable.createRow({
+              num : fact.num,
+              skipped : !factOk(fact),
+              studied : false,
+              lastQuizTime : null
+            });
+          });
+          return koredb.insert().into(factTable).values(rows).exec();
+        }
+      })
+      .then(o => { emit('seeAll'); });
+  return html`<div>Initializing the fun…</div>`;
+}
+
+/////////////////// Choo!
 
 // Set up state and handlers (in re-frame terminology)
 app.use((state, emitter) => {
-  state.quiz = null;      // Maybe [number under quiz 0 <= num <= 4999, field]
-  state.answered = null;  // Maybe number of answer
-  state.page = 'showall'; // Quiz | Answered | ShowAll | Learn
-  state.learning = null;  // Maybe (number to learn, 0 <= num <= 4999)
+  state.quiz = null;     // Maybe [number under quiz 0 <= num <= 4999, field]
+  state.answered = null; // Maybe number of answer
+  state.page = 'init';   // Quiz | Answered | ShowAll | Learn | Init
+  state.learning = null; // Maybe (number to learn, 0 <= num <= 4999)
 
   function wrapRender(f) {
     return data => {
@@ -28,7 +88,6 @@ app.use((state, emitter) => {
   emitter.on('proposeAnswer', wrapRender(data => {
                state.answered = data;
                state.page = 'answered';
-               // state.quiz = pickQuiz();
              }));
   emitter.on('seeAll', wrapRender(() => { state.page = 'showall'; }))
   emitter.on('learnFact', wrapRender((data) => {
@@ -50,6 +109,8 @@ function main(state, emit) {
     raw = allFacts(emit);
   } else if (state.page === 'learn') {
     raw = learning(state.learning, emit);
+  } else if (state.page === 'init') {
+    raw = initializing(emit);
   }
   return html`<div>
   <button onclick=${showClick}>Show all</button>
@@ -105,7 +166,7 @@ function quickRenderFact(fact) {
 
 function allFacts(emit) {
   var renderedFacts = tono.map(o => html`<li>
-    <button choo-num=${o.num - 1} onclick=${click}>learn</button>
+    <button choo-num=${o.num - 1} onclick=${click}>Study</button>
     ${quickRenderFact(o)}
     </li>`);
   return html`<ul>
@@ -226,3 +287,10 @@ function randinot(n, not) {
 }
 
 function randi(n) { return Math.floor(Math.random() * n); }
+
+module.exports = {
+  tono,
+  koredb,
+  factTable,
+  quizTable
+};
