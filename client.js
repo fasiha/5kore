@@ -165,7 +165,8 @@ function quickRenderFact(fact) {
 }
 
 function allFacts(emit) {
-  var renderedFacts = tono.map(o => html`<li>
+  var renderedFacts =
+      tono.map(o => html`<li class="${factOk(o) ? 'learnable' : 'skipped'}">
     <button choo-num=${o.num - 1} onclick=${click}>Study</button>
     ${quickRenderFact(o)}
     </li>`);
