@@ -11,7 +11,7 @@ schemaBuilder.createTable('Fact')
     .addColumn('lastQuizTime', lf.Type.DATE_TIME)
     .addColumn('recallObject', lf.Type.OBJECT)
     .addColumn('skipped', lf.Type.BOOLEAN)
-    .addColumn('studied', lf.Type.BOOLEAN)
+    .addColumn('started', lf.Type.BOOLEAN)
     .addPrimaryKey([ 'num' ])
     .addNullable([ 'lastQuizTime', 'recallObject' ]);
 // TODO Add an index to find the next thing to study
@@ -53,14 +53,30 @@ function initializing(emit) {
             return factTable.createRow({
               num : fact.num,
               skipped : !factOk(fact),
-              studied : false,
+              started : false,
               lastQuizTime : null
             });
           });
           return koredb.insert().into(factTable).values(rows).exec();
         }
+        return true;
       })
-      .then(o => { emit('seeAll'); });
+      .then(() => {
+        koredb.select()
+            .from(factTable)
+            .where(factTable.skipped.eq(true))
+            .exec()
+            .then(rows =>
+                      emit('skippedList', new Set(rows.map(r => r.num - 1))));
+        koredb.select()
+            .from(factTable)
+            .where(factTable.started.eq(true))
+            .exec()
+            .then(rows =>
+                      emit('startedList', new Set(rows.map(r => r.num - 1))));
+        return true;
+      })
+      .then(() => { emit('seeAll'); });
   return html`<div>Initializing the fun…</div>`;
 }
 
@@ -72,6 +88,8 @@ app.use((state, emitter) => {
   state.answered = null; // Maybe number of answer
   state.page = 'init';   // Quiz | Answered | ShowAll | Learn | Init
   state.learning = null; // Maybe (number to learn, 0 <= num <= 4999)
+  state.skippedNums = new Set([]); // Array of quiz numbers in (0, 4999)
+  state.startedNums = new Set([]); // Set of quiz numbers in (0, 4999)
 
   function wrapRender(f) {
     return data => {
@@ -95,18 +113,21 @@ app.use((state, emitter) => {
                state.learning = data;
              }));
   emitter.on('doneLearning', wrapRender(() => { state.page = 'showall'; }))
+  emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
+  emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
 });
 
 // Set up views
 function main(state, emit) {
   console.log(state);
+
   var raw;
   if (state.page === 'quiz') {
     raw = administerQuiz(state.quiz, emit);
   } else if (state.page === 'answered') {
     raw = answeredQuiz(state.quiz, state.answered);
   } else if (state.page === 'showall') {
-    raw = allFacts(emit);
+    raw = allFacts(state, emit);
   } else if (state.page === 'learn') {
     raw = learning(state.learning, emit);
   } else if (state.page === 'init') {
@@ -164,9 +185,14 @@ function quickRenderFact(fact) {
   return html`<span>${readings}</span>`;
 }
 
-function allFacts(emit) {
-  var renderedFacts =
-      tono.map(o => html`<li class="${factOk(o) ? 'learnable' : 'skipped'}">
+function allFacts(state, emit) {
+  var renderedFacts = tono.map(
+      o => html
+      `<li class="${
+                    state.skippedNums.has(o.num - 1) ? 'skipped' : 'learnable'
+                  } ${
+                      state.startedNums.has(o.num - 1) ? 'started' : 'unstarted'
+                    }">
     <button choo-num=${o.num - 1} onclick=${click}>Study</button>
     ${quickRenderFact(o)}
     </li>`);
@@ -293,5 +319,6 @@ module.exports = {
   tono,
   koredb,
   factTable,
-  quizTable
+  quizTable,
+  schemaBuilder
 };
