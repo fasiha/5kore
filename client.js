@@ -115,6 +115,26 @@ app.use((state, emitter) => {
   emitter.on('doneLearning', wrapRender(() => { state.page = 'showall'; }))
   emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
   emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
+
+  emitter.on('previousLearnable', wrapRender(() => {
+               state.learning = prevNextLearnable(state, -1);
+             }));
+  emitter.on('nextLearnable', wrapRender(() => {
+               state.learning = prevNextLearnable(state, +1);
+             }));
+
+  function prevNextLearnable(state, direction) {
+    // direction: -1 or +1
+    var curr = state.learning || 0;
+    var init = curr + direction;
+    for (let i = init; i >= 0 && i < tono.length; i += direction) {
+      if (!state.skippedNums.has(i) && !state.startedNums.has(i)) {
+        return i;
+      }
+    }
+    return curr;
+  }
+
 });
 
 // Set up views
@@ -162,7 +182,15 @@ function learning(num, emit) {
   </li>`
                                : '';
   return html`<div>
-  Remember this! ${quickRenderFact(fact)} means: ${fact.meaning}.
+  <p>
+  Skip learning this fact?
+  Jump to <button onclick=${prevClick}>Previous</button> or
+  <button onclick=${nextClick}>Next</button> unlearned + unskipped fact.
+  </p>
+  <p>
+  Remember this! <big>${quickRenderFact(fact)}</big> means: <em>${
+                                                                  fact.meaning
+                                                                }</em>.
   <ul>
     <li>Roumaji: ${fact.roumaji}</li>
     <li>Frequency: ${fact.freq} per million</li>
@@ -170,10 +198,13 @@ function learning(num, emit) {
     <li>Dispersion: ${fact.disp}</li>
     ${register}
   </ul>
+  </p>
   <button onclick=${learnedClick}>I HAVE LEARNED THIS!</button>
   </div>`;
 
   function learnedClick() { emit('doneLearning'); }
+  function prevClick() { emit('previousLearnable'); }
+  function nextClick() { emit('nextLearnable'); }
 }
 
 function quickRenderFact(fact) {
@@ -186,16 +217,17 @@ function quickRenderFact(fact) {
 }
 
 function allFacts(state, emit) {
-  var renderedFacts = tono.map(
-      o => html
-      `<li class="${
-                    state.skippedNums.has(o.num - 1) ? 'skipped' : 'learnable'
-                  } ${
-                      state.startedNums.has(o.num - 1) ? 'started' : 'unstarted'
-                    }">
-    <button choo-num=${o.num - 1} onclick=${click}>Study</button>
-    ${quickRenderFact(o)}
-    </li>`);
+  var skipped = o => state.skippedNums.has(o.num - 1) ? 'skipped' : 'learnable';
+  var started = o => state.startedNums.has(o.num - 1) ? 'started' : 'unstarted';
+  var renderedFacts =
+      tono.map(o => html`<li class="${skipped(o)} ${started(o)}">
+      
+      <button choo-num=${o.num - 1} onclick=${click}>Study</button>
+      
+      ${quickRenderFact(o)}
+      
+      </li>`);
+
   return html`<ul>
   ${renderedFacts}
   </ul>`;
