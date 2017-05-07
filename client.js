@@ -37,6 +37,8 @@ function factOk(fact) {
   return false;
 }
 
+/////////////////// Choo!
+
 function initializing(emit) {
   schemaBuilder.connect()
       .then(function(db) {
@@ -62,6 +64,7 @@ function initializing(emit) {
         return true;
       })
       .then(() => {
+        // Extract skipped/started from db into Choo state
         koredb.select()
             .from(factTable)
             .where(factTable.skipped.eq(true))
@@ -80,15 +83,13 @@ function initializing(emit) {
   return html`<div>Initializing the fun…</div>`;
 }
 
-/////////////////// Choo!
-
 // Set up state and handlers (in re-frame terminology)
 app.use((state, emitter) => {
   state.quiz = null;     // Maybe [number under quiz 0 <= num <= 4999, field]
   state.answered = null; // Maybe number of answer
   state.page = 'init';   // Quiz | Answered | ShowAll | Learn | Init
   state.learning = null; // Maybe (number to learn, 0 <= num <= 4999)
-  state.skippedNums = new Set([]); // Array of quiz numbers in (0, 4999)
+  state.skippedNums = new Set([]); // Set of quiz numbers in (0, 4999)
   state.startedNums = new Set([]); // Set of quiz numbers in (0, 4999)
 
   function wrapRender(f) {
@@ -112,7 +113,22 @@ app.use((state, emitter) => {
                state.page = 'learn';
                state.learning = data;
              }));
-  emitter.on('doneLearning', wrapRender(() => { state.page = 'showall'; }))
+  emitter.on(
+      'doneLearning', wrapRender(() => {
+        koredb.insert()
+            .into(quizTable)
+            .values([ quizTable.createRow(
+                {num : state.learning + 1, date : new Date(), result : true}) ])
+            .exec()
+            .then(() => koredb.update(factTable)
+                            .set(factTable.started, true)
+                            .where(factTable.num.eq(state.learning + 1))
+                            .exec())
+            .catch(err => console.log('ERROR in doneLearning:', err));
+        state.startedNums.add(state.learning);
+        emitter.emit('nextLearnable')
+      }));
+
   emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
   emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
 
@@ -122,6 +138,10 @@ app.use((state, emitter) => {
   emitter.on('nextLearnable', wrapRender(() => {
                state.learning = prevNextLearnable(state, +1);
              }));
+  // TODO 1: make all `num` refer to data (1-5000). Switch to `index` only for
+  // accessing `tono`.
+  // TODO 2: don’t store `started` in `factTable` since that’s derivable from
+  // `quizTable`.
 
   function prevNextLearnable(state, direction) {
     // direction: -1 or +1
