@@ -69,14 +69,12 @@ function initializing(emit) {
             .from(factTable)
             .where(factTable.skipped.eq(true))
             .exec()
-            .then(rows =>
-                      emit('skippedList', new Set(rows.map(r => r.num - 1))));
+            .then(rows => emit('skippedList', new Set(rows.map(r => r.num))));
         koredb.select()
             .from(factTable)
             .where(factTable.started.eq(true))
             .exec()
-            .then(rows =>
-                      emit('startedList', new Set(rows.map(r => r.num - 1))));
+            .then(rows => emit('startedList', new Set(rows.map(r => r.num))));
         return true;
       })
       .then(() => { emit('seeAll'); });
@@ -85,12 +83,12 @@ function initializing(emit) {
 
 // Set up state and handlers (in re-frame terminology)
 app.use((state, emitter) => {
-  state.quiz = null;     // Maybe [number under quiz 0 <= num <= 4999, field]
+  state.quiz = null;     // Maybe [number under quiz 1 <= num <= 5000, field]
   state.answered = null; // Maybe number of answer
   state.page = 'init';   // Quiz | Answered | ShowAll | Learn | Init
-  state.learning = null; // Maybe (number to learn, 0 <= num <= 4999)
-  state.skippedNums = new Set([]); // Set of quiz numbers in (0, 4999)
-  state.startedNums = new Set([]); // Set of quiz numbers in (0, 4999)
+  state.learning = null; // Maybe (number to learn, 1 <= num <= 5000)
+  state.skippedNums = new Set([]); // Set of quiz numbers in [1, 5000]
+  state.startedNums = new Set([]); // Set of quiz numbers in 1, 5000
 
   function wrapRender(f) {
     return data => {
@@ -113,21 +111,27 @@ app.use((state, emitter) => {
                state.page = 'learn';
                state.learning = data;
              }));
-  emitter.on(
-      'doneLearning', wrapRender(() => {
-        koredb.insert()
-            .into(quizTable)
-            .values([ quizTable.createRow(
-                {num : state.learning + 1, date : new Date(), result : true}) ])
-            .exec()
-            .then(() => koredb.update(factTable)
-                            .set(factTable.started, true)
-                            .where(factTable.num.eq(state.learning + 1))
-                            .exec())
-            .catch(err => console.log('ERROR in doneLearning:', err));
-        state.startedNums.add(state.learning);
-        emitter.emit('nextLearnable')
-      }));
+
+  emitter.on('doneLearning', wrapRender(() => {
+               dbNewlyLearned(state.learning);
+               state.startedNums.add(state.learning);
+               emitter.emit('nextLearnable')
+             }));
+  function dbNewlyLearned(num) {
+    // If Lovefield is updated with `state`, it may have mutated before this
+    // Promise is run! Mutable state eeek! So call it with a scalar which is
+    // call-by-value.
+    koredb.insert()
+        .into(quizTable)
+        .values([ quizTable.createRow(
+            {num : num, date : new Date(), result : true}) ])
+        .exec()
+        .then(() => koredb.update(factTable)
+                        .set(factTable.started, true)
+                        .where(factTable.num.eq(num))
+                        .exec())
+        .catch(err => console.log('ERROR in doneLearning:', err));
+  }
 
   emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
   emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
@@ -138,8 +142,6 @@ app.use((state, emitter) => {
   emitter.on('nextLearnable', wrapRender(() => {
                state.learning = prevNextLearnable(state, +1);
              }));
-  // TODO 1: make all `num` refer to data (1-5000). Switch to `index` only for
-  // accessing `tono`.
   // TODO 2: don’t store `started` in `factTable` since that’s derivable from
   // `quizTable`.
 
@@ -147,7 +149,7 @@ app.use((state, emitter) => {
     // direction: -1 or +1
     var curr = state.learning || 0;
     var init = curr + direction;
-    for (let i = init; i >= 0 && i < tono.length; i += direction) {
+    for (let i = init; i > 0 && i <= tono.length; i += direction) {
       if (!state.skippedNums.has(i) && !state.startedNums.has(i)) {
         return i;
       }
@@ -196,7 +198,7 @@ var registerToFull = {
 };
 
 function learning(num, emit) {
-  var fact = tono[num];
+  var fact = tono[num - 1];
   var register = fact.register ? html`<li>
   Top word in the <em>${registerToFull[fact.register]}</em> register.
   </li>`
@@ -237,12 +239,12 @@ function quickRenderFact(fact) {
 }
 
 function allFacts(state, emit) {
-  var skipped = o => state.skippedNums.has(o.num - 1) ? 'skipped' : 'learnable';
-  var started = o => state.startedNums.has(o.num - 1) ? 'started' : 'unstarted';
+  var skipped = o => state.skippedNums.has(o.num) ? 'skipped' : 'learnable';
+  var started = o => state.startedNums.has(o.num) ? 'started' : 'unstarted';
   var renderedFacts =
       tono.map(o => html`<li class="${skipped(o)} ${started(o)}">
       
-      <button choo-num=${o.num - 1} onclick=${click}>Study</button>
+      <button choo-num=${o.num} onclick=${click}>Study</button>
       
       ${quickRenderFact(o)}
       
@@ -259,14 +261,14 @@ function answeredQuiz(picked, answer) {
   var result = answer === picked[0];
   var resultStr = result ? "🙌 congrats!" : "💩";
   return html`<div>${resultStr}
-  ${JSON.stringify(tono[picked[0]])}
+  ${JSON.stringify(tono[picked[0] - 1])}
   </div>`;
 }
 
 // Administer a quiz
 function administerQuiz(picked, emit) {
   var [num, field] = picked;
-  var fact = tono[num];
+  var fact = tono[num - 1];
   var hasKanji = fact.kanjis.length > 0;
 
   // Prompts to elicit the field under quiz from student
@@ -284,7 +286,7 @@ function administerQuiz(picked, emit) {
   // confusers, or alternatively a more complicated UI could be here (text
   // input, reorder words, etc.)
   var confusers;
-  var btn = (i) => html`<button choo-num=${i - 1} onclick=${accept}>x</button>`;
+  var btn = (i) => html`<button choo-num=${i} onclick=${accept}>x</button>`;
   if (field === 'kanjis') {
     let f = Array.from(Array(4), () => tono[randomFactWithKanji(num)]);
     f.push(fact);
@@ -304,7 +306,7 @@ function administerQuiz(picked, emit) {
   }
 
   return html`<div>
-      You have to guess #${num + 1}’s ${field}! Soooo, ${clues}! Is it:
+      You have to guess #${num}’s ${field}! Soooo, ${clues}! Is it:
       <ol>
       ${confusers}
       </ol>
@@ -319,13 +321,13 @@ function administerQuiz(picked, emit) {
 // Pick a fact (and any specifics, like sub-fact) to quiz
 function pickQuiz() {
   var topics;
-  var num = randi(tono.length);
-  if (tono[num].kanjis.length === 0) {
+  var idx = randi(tono.length);
+  if (tono[idx].kanjis.length === 0) {
     topics = [ 'readings', 'meaning' ]
   } else {
     topics = [ 'kanjis', 'readings', 'meaning' ];
   }
-  const quiz = [ num, topics[randi(topics.length)] ];
+  const quiz = [ idx + 1, topics[randi(topics.length)] ];
   return quiz;
 }
 
@@ -336,9 +338,9 @@ function randomFactWithKanji(not) {
     not = -1;
   }
   while (true) {
-    var num = randi(tono.length);
-    if (tono[num].kanjis.length > 0 && num !== not) {
-      return num
+    var idx = randi(tono.length);
+    if (tono[idx].kanjis.length > 0 && tono[idx].num !== not) {
+      return idx
     };
   }
 }
