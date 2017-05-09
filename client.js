@@ -37,6 +37,9 @@ function factOk(fact) {
   return false;
 }
 
+// Ebisu stuff
+var DEFAULT_RECALL_OBJECT = [ 4, 4, 24 ];
+
 /////////////////// Choo!
 
 function initializing(emit) {
@@ -74,7 +77,11 @@ function initializing(emit) {
             .from(factTable)
             .where(factTable.started.eq(true))
             .exec()
-            .then(rows => emit('startedList', new Set(rows.map(r => r.num))));
+            .then(rows => emit('startedList',
+                               new Map(rows.map(r => [r.num, {
+                                                  recallObject : r.recallObject,
+                                                  lastQuizTime : r.lastQuizTime
+                                                }]))));
         return true;
       })
       .then(() => { emit('seeAll'); });
@@ -88,7 +95,7 @@ app.use((state, emitter) => {
   state.page = 'init';   // Quiz | Answered | ShowAll | Learn | Init
   state.learning = null; // Maybe (number to learn, 1 <= num <= 5000)
   state.skippedNums = new Set([]); // Set of quiz numbers in [1, 5000]
-  state.startedNums = new Set([]); // Set of quiz numbers in 1, 5000
+  state.startedNums = new Map([]); // Set of quiz numbers in 1, 5000
 
   function wrapRender(f) {
     return data => {
@@ -113,21 +120,27 @@ app.use((state, emitter) => {
              }));
 
   emitter.on('doneLearning', wrapRender(() => {
-               dbNewlyLearned(state.learning);
-               state.startedNums.add(state.learning);
+               var d = new Date();
+               dbNewlyLearned(state.learning, d, true);
+               state.startedNums.set(
+                   state.learning,
+                   {recallObject : DEFAULT_RECALL_OBJECT, lastQuizTime : d});
                emitter.emit('nextLearnable')
              }));
-  function dbNewlyLearned(num) {
-    // If Lovefield is updated with `state`, it may have mutated before this
-    // Promise is run! Mutable state eeek! So call it with a scalar which is
-    // call-by-value.
+
+  function dbNewlyLearned(num, date, result) {
+    // If Lovefield is updated with `state`, it may have mutated before
+    // this Promise is run! Mutable state eeek! So call it with a scalar
+    // which is call-by-value.
     koredb.insert()
         .into(quizTable)
-        .values([ quizTable.createRow(
-            {num : num, date : new Date(), result : true}) ])
+        .values(
+            [ quizTable.createRow({num : num, date : date, result : result}) ])
         .exec()
         .then(() => koredb.update(factTable)
                         .set(factTable.started, true)
+                        .set(factTable.recallObject, DEFAULT_RECALL_OBJECT)
+                        .set(factTable.lastQuizTime, date)
                         .where(factTable.num.eq(num))
                         .exec())
         .catch(err => console.log('ERROR in doneLearning:', err));
@@ -135,6 +148,16 @@ app.use((state, emitter) => {
 
   emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
   emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
+
+  emitter.on('quizOrLearn', wrapRender(() => {
+               var r = Math.random();
+               if (r < 0.5) {
+                 state.page = 'learn';
+                 emitter.emit('nextLearnable', 1);
+               } else {
+                 emitter.emit('pickedQuiz', pickQuiz());
+               }
+             }));
 
   emitter.on('previousLearnable', wrapRender((num) => {
                state.page = 'learn';
@@ -181,12 +204,14 @@ function main(state, emit) {
   }
 
   return html`<div>
-  <button onclick=${showClick}>Show all</button>
+  <button onclick=${tellClick}>Tell me what to do</button>
   <button onclick=${learnClick}>Learn me</button>
   <button onclick=${hitClick}>Quiz me</button>
+  <button onclick=${showClick}>Show all</button>
   ${raw}
   </div>`;
 
+  function tellClick(e) { emit('quizOrLearn'); }
   function hitClick(e) { emit('pickedQuiz', pickQuiz()); }
   function learnClick(e) { emit('nextLearnable', 1); }
   function showClick(e) { emit('seeAll'); }
