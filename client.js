@@ -136,21 +136,25 @@ app.use((state, emitter) => {
   emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
   emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
 
-  emitter.on('previousLearnable', wrapRender(() => {
-               state.learning = prevNextLearnable(state, -1);
+  emitter.on('previousLearnable', wrapRender((num) => {
+               state.page = 'learn';
+               state.learning = prevNextLearnable(num, state.skippedNums,
+                                                  state.startedNums, -1);
              }));
-  emitter.on('nextLearnable', wrapRender(() => {
-               state.learning = prevNextLearnable(state, +1);
+  emitter.on('nextLearnable', wrapRender((num) => {
+               state.page = 'learn';
+               state.learning = prevNextLearnable(num, state.skippedNums,
+                                                  state.startedNums, +1);
              }));
   // TODO 2: don’t store `started` in `factTable` since that’s derivable from
   // `quizTable`.
 
-  function prevNextLearnable(state, direction) {
+  function prevNextLearnable(num, skippedNums, startedNums, direction) {
     // direction: -1 or +1
-    var curr = state.learning || 0;
+    var curr = num || 1;
     var init = curr + direction;
     for (let i = init; i > 0 && i <= tono.length; i += direction) {
-      if (!state.skippedNums.has(i) && !state.startedNums.has(i)) {
+      if (!skippedNums.has(i) && !startedNums.has(i)) {
         return i;
       }
     }
@@ -175,13 +179,16 @@ function main(state, emit) {
   } else if (state.page === 'init') {
     raw = initializing(emit);
   }
+
   return html`<div>
   <button onclick=${showClick}>Show all</button>
+  <button onclick=${learnClick}>Learn me</button>
   <button onclick=${hitClick}>Quiz me</button>
   ${raw}
   </div>`;
 
   function hitClick(e) { emit('pickedQuiz', pickQuiz()); }
+  function learnClick(e) { emit('nextLearnable', 1); }
   function showClick(e) { emit('seeAll'); }
 }
 app.route('/', main);
@@ -225,8 +232,8 @@ function learning(num, emit) {
   </div>`;
 
   function learnedClick() { emit('doneLearning'); }
-  function prevClick() { emit('previousLearnable'); }
-  function nextClick() { emit('nextLearnable'); }
+  function prevClick() { emit('previousLearnable', num); }
+  function nextClick() { emit('nextLearnable', num); }
 }
 
 function quickRenderFact(fact) {
