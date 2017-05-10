@@ -187,29 +187,29 @@ app.use((state, emitter) => {
   emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
   emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
 
-  function dbReviewed(num, object, date, result, proposedAnswer) {
-    // If Lovefield is updated with `state`, it may have mutated before
-    // this Promise is run! Mutable state eeek! So call it with a scalar
-    // which is call-by-value.
-    koredb.insert()
-        .into(quizTable)
-        .values([ quizTable.createRow({
-          num : num,
-          date : date,
-          result : result,
-          proposedAnswer : proposedAnswer || null
-        }) ])
-        .exec()
-        .catch(err => console.log('ERROR updating quizTable:', err));
-    koredb.update(factTable)
-        .set(factTable.started, true)
-        .set(factTable.recallObject, object)
-        .set(factTable.lastQuizTime, date)
-        .where(factTable.num.eq(num))
-        .exec()
-        .catch(err => console.log('ERROR updating factTable:', err));
-  }
-  
+      function dbReviewed(num, object, date, result, proposedAnswer) {
+        // If Lovefield is updated with `state`, it may have mutated before
+        // this Promise is run! Mutable state eeek! So call it with a scalar
+        // which is call-by-value.
+        koredb.insert()
+            .into(quizTable)
+            .values([ quizTable.createRow({
+              num : num,
+              date : date,
+              result : result,
+              proposedAnswer : proposedAnswer || null
+            }) ])
+            .exec()
+            .catch(err => console.log('ERROR updating quizTable:', err));
+        koredb.update(factTable)
+            .set(factTable.started, true)
+            .set(factTable.recallObject, object)
+            .set(factTable.lastQuizTime, date)
+            .where(factTable.num.eq(num))
+            .exec()
+            .catch(err => console.log('ERROR updating factTable:', err));
+      }
+
   function prevNextLearnable(num, skippedNums, startedNums, direction) {
     // direction: -1 or +1
     var curr = num || 1;
@@ -240,12 +240,17 @@ function main(state, emit) {
     raw = initializing(emit);
   }
 
+  var about = html`<p>
+  <small><a href="https://github.com/fasiha/5kore">About</a></small>
+  </p>`;
+
   return html`<div>
   <button onclick=${tellClick}>Tell me what to do</button>
   <button onclick=${learnClick}>Learn me</button>
   <button onclick=${hitClick}>Quiz me</button>
   <button onclick=${showClick}>Show all</button>
   ${raw}
+  ${about}
   </div>`;
 
   function tellClick(e) { emit('quizOrLearn'); }
