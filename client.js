@@ -252,7 +252,7 @@ function main(state, emit) {
   function learnClick(e) { emit('nextLearnable', 1); }
   function showClick(e) { emit('seeAll'); }
 }
-app.route('/', main);
+app.route('*', main);
 app.mount('#app');
 
 ///////////////// Quizzer! And other screens!
