@@ -1,0 +1,3 @@
+# 5kore
+
+Tentatively Unlicense.

@@ -2,7 +2,7 @@
   "name": "appily-ebisu",
   "version": "1.0.0",
   "main": "index.js",
-  "license": "MIT",
+  "license": "Unlicense",
   "dependencies": {
     "choo": "^5.4.0",
     "lovefield": "^2.1.12"
