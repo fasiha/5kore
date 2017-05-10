@@ -3,6 +3,24 @@ var choo = require('choo');
 var html = require('choo/html');
 var app = choo();
 
+///////////////////// Ebisu stuff & utilities
+var DEFAULT_RECALL_OBJECT = [ 4, 4, 1 ];
+
+function factOk(fact) {
+  var lookFors = 'n.,v.,adj.,adv.,pron.,adn.'.split(',');
+  for (let target of lookFors) {
+    if (fact.meaning.indexOf(target) >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hoursElapsed(date) {
+  const msPerHour = 3600e3;
+  return ((new Date()) - date) / msPerHour;
+}
+
 /////////////////// Lovefield
 
 var schemaBuilder = lf.schema.create('5kore', 1);
@@ -20,25 +38,13 @@ schemaBuilder.createTable('Quiz')
     .addColumn('num', lf.Type.NUMBER)
     .addColumn('date', lf.Type.DATE_TIME)
     .addColumn('result', lf.Type.BOOLEAN)
+    .addColumn('proposedAnswer', lf.Type.OBJECT)
     .addPrimaryKey([ 'date' ])
     .addForeignKey('fk_NumQuiz', {local : 'num', ref : 'Fact.num'});
 
 var koredb;
 var factTable;
 var quizTable;
-
-function factOk(fact) {
-  var lookFors = 'n.,v.,adj.,adv.,pron.,adn.'.split(',');
-  for (let target of lookFors) {
-    if (fact.meaning.indexOf(target) >= 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Ebisu stuff
-var DEFAULT_RECALL_OBJECT = [ 4, 4, 24 ];
 
 /////////////////// Choo!
 
@@ -104,12 +110,28 @@ app.use((state, emitter) => {
     };
   }
   emitter.on('pickedQuiz', wrapRender(data => {
-               state.quiz = data;
-               state.answered = null;
-               state.page = 'quiz';
+               if (data.found) {
+                 state.quiz = [ data.num, data.topic ];
+                 state.answered = null;
+                 state.page = 'quiz';
+               } else {
+                 console.log('No quizzes possible! Learn someting first!');
+               }
              }));
   emitter.on('clearQuiz', wrapRender(data => state.quiz = null));
   emitter.on('proposeAnswer', wrapRender(data => {
+               var num = state.quiz[0];
+               var date = new Date();
+               var result = num === data;
+               var recallObject = ebisu.updateRecall(
+                   state.startedNums.get(num).recallObject, result,
+                   hoursElapsed(state.startedNums.get(num).lastQuizTime));
+
+               dbReviewed(state.quiz[0], recallObject, date, result, data);
+
+               state.startedNums.set(
+                   num, {recallObject : recallObject, lastQuizTime : date})
+
                state.answered = data;
                state.page = 'answered';
              }));
@@ -121,41 +143,28 @@ app.use((state, emitter) => {
 
   emitter.on('doneLearning', wrapRender(() => {
                var d = new Date();
-               dbNewlyLearned(state.learning, d, true);
+               dbReviewed(state.learning, DEFAULT_RECALL_OBJECT, d, true);
                state.startedNums.set(
                    state.learning,
                    {recallObject : DEFAULT_RECALL_OBJECT, lastQuizTime : d});
                emitter.emit('nextLearnable')
              }));
 
-  function dbNewlyLearned(num, date, result) {
-    // If Lovefield is updated with `state`, it may have mutated before
-    // this Promise is run! Mutable state eeek! So call it with a scalar
-    // which is call-by-value.
-    koredb.insert()
-        .into(quizTable)
-        .values(
-            [ quizTable.createRow({num : num, date : date, result : result}) ])
-        .exec()
-        .then(() => koredb.update(factTable)
-                        .set(factTable.started, true)
-                        .set(factTable.recallObject, DEFAULT_RECALL_OBJECT)
-                        .set(factTable.lastQuizTime, date)
-                        .where(factTable.num.eq(num))
-                        .exec())
-        .catch(err => console.log('ERROR in doneLearning:', err));
-  }
-
-  emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
-  emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
-
   emitter.on('quizOrLearn', wrapRender(() => {
-               var r = Math.random();
-               if (r < 0.5) {
+               var {numMinRecallProb, minRecallProb, minFound} =
+                   lowestRecallProb(state.startedNums);
+               var decision =
+                   (!minFound || minRecallProb < 0.5) ? 'learn' : 'quiz';
+
+               if (decision === 'learn') {
                  state.page = 'learn';
                  emitter.emit('nextLearnable', 1);
                } else {
-                 emitter.emit('pickedQuiz', pickQuiz());
+                 emitter.emit('pickedQuiz', {
+                   found : true,
+                   num : numMinRecallProb,
+                   topic : pickSubQuiz(numMinRecallProb)
+                 });
                }
              }));
 
@@ -171,7 +180,35 @@ app.use((state, emitter) => {
              }));
   // TODO 2: don’t store `started` in `factTable` since that’s derivable from
   // `quizTable`.
+  // TODO 3: `tono` should be passed around yeah?
 
+  // Only called during Lovefield initialization
+  emitter.on('skippedList', wrapRender(data => { state.skippedNums = data; }))
+  emitter.on('startedList', wrapRender(data => { state.startedNums = data; }))
+
+  function dbReviewed(num, object, date, result, proposedAnswer) {
+    // If Lovefield is updated with `state`, it may have mutated before
+    // this Promise is run! Mutable state eeek! So call it with a scalar
+    // which is call-by-value.
+    koredb.insert()
+        .into(quizTable)
+        .values([ quizTable.createRow({
+          num : num,
+          date : date,
+          result : result,
+          proposedAnswer : proposedAnswer || null
+        }) ])
+        .exec()
+        .catch(err => console.log('ERROR updating quizTable:', err));
+    koredb.update(factTable)
+        .set(factTable.started, true)
+        .set(factTable.recallObject, object)
+        .set(factTable.lastQuizTime, date)
+        .where(factTable.num.eq(num))
+        .exec()
+        .catch(err => console.log('ERROR updating factTable:', err));
+  }
+  
   function prevNextLearnable(num, skippedNums, startedNums, direction) {
     // direction: -1 or +1
     var curr = num || 1;
@@ -183,7 +220,6 @@ app.use((state, emitter) => {
     }
     return curr;
   }
-
 });
 
 // Set up views
@@ -212,7 +248,7 @@ function main(state, emit) {
   </div>`;
 
   function tellClick(e) { emit('quizOrLearn'); }
-  function hitClick(e) { emit('pickedQuiz', pickQuiz()); }
+  function hitClick(e) { emit('pickedQuiz', pickQuiz(state.startedNums)); }
   function learnClick(e) { emit('nextLearnable', 1); }
   function showClick(e) { emit('seeAll'); }
 }
@@ -237,11 +273,6 @@ function learning(num, emit) {
                                : '';
   return html`<div>
   <p>
-  Skip learning this fact?
-  Jump to <button onclick=${prevClick}>Previous</button> or
-  <button onclick=${nextClick}>Next</button> unlearned + unskipped fact.
-  </p>
-  <p>
   Remember this! <big>${quickRenderFact(fact)}</big> means: <em>${
                                                                   fact.meaning
                                                                 }</em>.
@@ -253,7 +284,13 @@ function learning(num, emit) {
     ${register}
   </ul>
   </p>
+  <p>
   <button onclick=${learnedClick}>I HAVE LEARNED THIS!</button>
+  Or… skip learning this fact?
+  Jump to <button onclick=${prevClick}>Previous</button> or
+  <button onclick=${nextClick}>Next</button> unlearned + unskipped fact.
+  </p>
+
   </div>`;
 
   function learnedClick() { emit('doneLearning'); }
@@ -350,17 +387,42 @@ function administerQuiz(picked, emit) {
   }
 }
 
-// Pick a fact (and any specifics, like sub-fact) to quiz
-function pickQuiz() {
-  var topics;
-  var idx = randi(tono.length);
-  if (tono[idx].kanjis.length === 0) {
-    topics = [ 'readings', 'meaning' ]
-  } else {
-    topics = [ 'kanjis', 'readings', 'meaning' ];
+function lowestRecallProb(startedNums) {
+  console.log(startedNums);
+  var minFound = false;
+  var minRecallProb = 1.1;
+  var numMinRecallProb = -1;
+  for (let [num, {recallObject, lastQuizTime}] of startedNums) {
+    let prob = ebisu.predictRecall(recallObject, hoursElapsed(lastQuizTime));
+    console.log('num', num, 'prob', prob);
+    if (prob < minRecallProb) {
+      minRecallProb = prob;
+      numMinRecallProb = num;
+      minFound = true;
+    }
   }
-  const quiz = [ idx + 1, topics[randi(topics.length)] ];
-  return quiz;
+  return {numMinRecallProb, minRecallProb, minFound};
+}
+
+function pickSubQuiz(num) {
+  let topics = [ 'readings', 'meaning' ];
+  if (tono[num - 1].kanjis.length) {
+    topics.push('kanjis');
+  }
+  return topics[randi(topics.length)];
+}
+
+// Pick a fact (and any specifics, like sub-fact) to quiz
+function pickQuiz(startedNums) {
+  var {minFound, numMinRecallProb} = lowestRecallProb(startedNums);
+  if (minFound) {
+    return {
+      found : true,
+      num : numMinRecallProb,
+      topic : pickSubQuiz(numMinRecallProb)
+    };
+  }
+  return {found : false};
 }
 
 // Utilities
