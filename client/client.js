@@ -5,7 +5,7 @@ var html = require('choo/html');
 var app = choo();
 
 ///////////////////// Ebisu stuff & utilities
-var DEFAULT_RECALL_OBJECT = [ 4, 4, 1 ];
+var DEFAULT_RECALL_OBJECT = [ 4, 4, 0.25 ]; // FIFTEEN MINUTES HALF-LIFE!
 
 function factOk(fact) {
   var lookFors = 'n.,v.,adj.,adv.,pron.,adn.'.split(',');
@@ -155,7 +155,7 @@ app.use((state, emitter) => {
                var {numMinRecallProb, minRecallProb, minFound} =
                    lowestRecallProb(state.startedNums);
                var decision =
-                   (!minFound || minRecallProb < 0.5) ? 'learn' : 'quiz';
+                   (minFound && minRecallProb < 0.5) ? 'quiz' : 'learn';
 
                if (decision === 'learn') {
                  state.page = 'learn';
@@ -367,16 +367,16 @@ function administerQuiz(picked, emit) {
     f.push(fact);
     shuffle(f);
     confusers =
-        f.map(f => html`<li>${btn(f.num)}${f.num}${f.kanjis.join('/')}</li>`);
+        f.map(f => html`<li>${btn(f.num)}${f.kanjis.join('/')}</li>`);
   } else {
     let f = Array.from(Array(4), () => tono[randinot(tono.length, num)]);
     f.push(fact);
     shuffle(f);
     if (field === 'readings') {
       confusers = f.map(
-          f => html`<li>${btn(f.num)}${f.num}${f.readings.join('/')}</li>`);
+          f => html`<li>${btn(f.num)}${f.readings.join('/')}</li>`);
     } else {
-      confusers = f.map(f => html`<li>${btn(f.num)}${f.num}${f.meaning}</li>`);
+      confusers = f.map(f => html`<li>${btn(f.num)}${f.meaning}</li>`);
     }
   }
 
@@ -394,13 +394,13 @@ function administerQuiz(picked, emit) {
 }
 
 function lowestRecallProb(startedNums) {
-  console.log(startedNums);
+  // console.log(startedNums);
   var minFound = false;
   var minRecallProb = 1.1;
   var numMinRecallProb = -1;
   for (let [num, {recallObject, lastQuizTime}] of startedNums) {
     let prob = ebisu.predictRecall(recallObject, hoursElapsed(lastQuizTime));
-    console.log('num', num, 'prob', prob);
+    // console.log('num', num, 'prob', prob);
     if (prob < minRecallProb) {
       minRecallProb = prob;
       numMinRecallProb = num;
